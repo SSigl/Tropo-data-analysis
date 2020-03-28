@@ -19,8 +19,9 @@ library(factoextra)
 library(cluster) 
 library(NbClust)
 
-# packages utiles pour ACP
+# packages utiles pour ACP/ACM
 library(FactoMineR)
+library(Factoshiny)
 
 # packages utiles pour les random forest
 library(VSURF)
@@ -132,7 +133,7 @@ for(i in 1:length(col_comma)){
 }
 for(i in 1:length(col_comma)){
   j = which(colnames(data_quanti_TRISS)==col_comma[i])
-  data_quanti_RTS[,j] <- as.numeric(gsub(",", ".", gsub("\\.", "", data_quanti_TRISS[,j])))
+  data_quanti_TRISS[,j] <- as.numeric(gsub(",", ".", gsub("\\.", "", data_quanti_TRISS[,j])))
 }
 for(i in 1:length(other_col_RTS)){
   j = which(colnames(data_quanti_RTS)==other_col_RTS[i])
@@ -147,9 +148,19 @@ for(i in 1:length(other_col_TRISS)){
 data_quanti_RTS <- na.omit(data_quanti_RTS)
 data_quanti_TRISS <- na.omit(data_quanti_TRISS)
 
-PCA(data_quanti_RTS)
-PCA(data_quanti_TRISS)
+ACP_RTS <- PCA(data_quanti_RTS)
+ACP_TRISS <- PCA(data_quanti_TRISS)
 
+barplot(ACP_RTS$eig[,1])
+barplot(ACP_TRISS$eig[,1])
+
+plot.PCA(ACP_RTS,choix="var")
+plot.PCA(ACP_TRISS,choix="var")
+
+
+# ACM maintenant avec toutes les variables
+
+a <- MCA(data)
 
 
 
@@ -163,6 +174,7 @@ PCA(data_quanti_TRISS)
 #is_val_miss <- function(x){return (sum(is.na(x)))}
 
 #missing_val <- apply(data,2,is_val_miss)
+
 
 
 
