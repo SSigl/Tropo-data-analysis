@@ -18,10 +18,11 @@ library(gdata)
 library(factoextra) 
 library(cluster) 
 library(NbClust)
+library(car)
+library(dplyr)
 
 # packages utiles pour ACP/ACM
 library(FactoMineR)
-library(Factoshiny)
 
 # packages utiles pour les random forest
 library(VSURF)
@@ -68,6 +69,16 @@ data$`Trauma Injury Severity Score (TRISS in %)` <-as.numeric(gsub(",", ".", gsu
 # résultats : (on voit bien la différence entre les deux scores)
 #table(data$`Revised Trauma Score (RTS)`)
 #table(data$`Trauma Injury Severity Score (TRISS in %)`)
+
+
+# quelques petits ajustements (problème de codage -- nettoyage de la bdd)
+data$Deces <- recode(data$Deces,"c('Non ')='Non'")
+data$`ASA-PS` <- recode(data$`ASA-PS`,"c('7, inconnu')=NA")
+data$`Anomalie pupillaire (Pre-hospitalier)`<- recode(data$`Anomalie pupillaire (Pre-hospitalier)`,
+                                              "c('Anisocorie unilaterale','Anomalie pupillaire',
+                                              'Mydriase\n bilaterale')='Oui'")
+data$`Anomalie pupillaire (Pre-hospitalier)`[data$`Anomalie pupillaire (Pre-hospitalier)`!='Non'] <- 'Oui'
+# rq : les deux dernières lignes sont nécessaires (ce n'est pas une erreur)
 
 
 
@@ -117,7 +128,7 @@ col_quanti_TRISS <-
 
 # les colonnes avec des virgules au lieu des points (pour effectuer le remplacement après)
 col_comma <- c('Taille (en m)','BMI','Hemocue initial','Hemocue, a l arrivee hopital par equipe hopital','Temperature','pH',
-               'Exces de base','Hb conventionnelle laboratoire','Fibrinogene','Alcoolemie (g L)')
+               'Exces de base','Hb conventionnelle laboratoire','Fibrinogene','Alcoolemie (g L)','FiO2')
 
 other_col_RTS <- setdiff(col_quanti_RTS,col_comma)
 other_col_TRISS <- setdiff(col_quanti_TRISS,col_comma)
@@ -158,29 +169,80 @@ plot.PCA(ACP_RTS,choix="var")
 plot.PCA(ACP_TRISS,choix="var")
 
 
-# ACM maintenant avec toutes les variables
-
-a <- MCA(data)
-
+#________________________________________________________
+#                     RANDOM FOREST
 
 
-#data.surf <- VSURF(data[,-110],data[,110])
-#train <- data %>% sample_frac(0.8)
-#test <- anti_join(data, train)
-#(model <- randomForest(Deces ~ ., data = train, ntree = 500, na.action = na.omit))
+# on sélectionne les variables "initiales" (juste après le trauma)
 
-#sum(is.na(data[,3]))
+col_init <- c('Score ISS','Trauma Injury Severity Score (TRISS in %)','Revised Trauma Score (RTS)','SCORE MGAP',
+              'Age du patient (ans)','Sexe','Poids (en kg)', 'Taille (en m)','BMI','ASA-PS','Amputation','Annonce comme instable',
+              'Traitement anticoagulant','Traitement antiagregants','Anomalie pupillaire (Pre-hospitalier)',
+              'Arret cardio-respiratoire (massage)','Intubation orotracheale (IOT) SMUR','Temperature','pH',
+              'PaO2','pCO2','Exces de base','FiO2','Hb conventionnelle laboratoire','Plaquettes','TP',
+              'Fibrinogene','Creatinine','Bicar mesure','Troponine standard','Troponine ultrasensible',
+              'Alcoolemie (g L)','Deces','Glasgow initial','Glasgow moteur initial','Mecanisme en cause','Origine du patient','Blast',
+              'Ischemie du membre','Pression Arterielle Diastolique (PAD) a l arrivee du SMUR',
+              'Pression Arterielle Systolique (PAS) a l arrivee du SMUR','Frequence cardiaque (FC) a l arrivee du SMUR',
+              'Hemocue initial','Hemocue, a l arrivee hopital par equipe hopital','Delai   arrivee sur les lieux - arrivee hopital  ',
+              'Total Score IGS','Total Score SOFA','Nombre de jours a  l hopital')
 
-#is_val_miss <- function(x){return (sum(is.na(x)))}
+data_RF <- subset(data,select=col_init)
 
-#missing_val <- apply(data,2,is_val_miss)
+col_comma <- c('Taille (en m)','BMI','Hemocue initial','Hemocue, a l arrivee hopital par equipe hopital','Temperature','pH',
+               'Exces de base','Hb conventionnelle laboratoire','Fibrinogene','Alcoolemie (g L)','FiO2')
 
+other_num_col <- c('Score ISS','Trauma Injury Severity Score (TRISS in %)','Revised Trauma Score (RTS)','SCORE MGAP', 
+                   'Glasgow initial','Glasgow moteur initial','Total Score IGS','Total Score SOFA',
+                   'Age du patient (ans)','Poids (en kg)','PaO2','pCO2','Plaquettes','TP','Creatinine','Bicar mesure',
+                   'Troponine standard','Troponine ultrasensible','Pression Arterielle Diastolique (PAD) a l arrivee du SMUR',
+                   'Pression Arterielle Systolique (PAS) a l arrivee du SMUR','Frequence cardiaque (FC) a l arrivee du SMUR',
+                   'Delai   arrivee sur les lieux - arrivee hopital  ','Nombre de jours a  l hopital')
 
+other_fact_col <- setdiff(col_init,c(col_comma,other_num_col))
 
+# convertir les variables au format approprié (numerique ou facteur)
+for(i in 1:length(col_comma)){
+  j = which(colnames(data_RF)==col_comma[i])
+  data_RF[,j] <- as.numeric(gsub(",", ".", gsub("\\.", "", data_RF[,j])))
+}
+for(i in 1:length(other_num_col)){
+  j = which(colnames(data_RF)==other_num_col[i])
+  data_RF[,j] <- as.numeric(data_RF[,j])
+}
+for(i in 1:length(other_fact_col)){
+  j = which(colnames(data_RF)==other_fact_col[i])
+  data_RF[,j] <- as.factor(data_RF[,j])
+  
+}
 
+# remarque : le score de Glasgow de sortie est rarement calculé 
+# au lieu de ça : on peut plutôt prendre en compte la durée du séjour à l'hôpital 
 
+data_RF <- na.omit(data_RF)
 
+# première méthode de sélection de variables
+data.surf <- VSURF(data_RF[,-48],data_RF[,48])
+var_imp <- as.array(data.surf$varselect.pred)
+get_name <- function(i){return(colnames(data_RF)[i])}
+var_imp <- apply(var_imp,1,get_name)
+# la troponine ultrasensible fait partie des variables les plus importantes.
 
+# deuxième méthode de sélection de variables (on utilise un autre package)
 
+set.seed(100)
+revised_col <- make.names(colnames(data_RF))
+names(data_RF) <- revised_col
+
+rf0<-randomForest(`Nombre.de.jours.a..l.hopital` ~ ., data=data_RF, mtry =6, ntree=200, nodesize=1, importance=TRUE,na.action = na.omit)
+imp <- importance(rf0, type = 1, scale=T)
+varImpPlot(rf0, type=1)
+
+o<-order(imp,decreasing=TRUE)
+plot(imp[o],type='b',pch=20, axes=F, xlab="", ylab='importance')
+axis(1,c(1:length(imp)), rownames(imp)[o], las=2, cex=0.5)
+axis(2)
+rownames(imp)[o]
+# idem la troponine ultrasensible est aussi dans les 10 variables les plus importantes.
 
 
